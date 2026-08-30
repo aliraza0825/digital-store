@@ -1,3 +1,4 @@
+
 # Digital Store — setup guide
 
 A 3-screen store for selling digital downloads (Canva templates, ebooks, PDFs), built with
