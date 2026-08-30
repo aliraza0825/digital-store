@@ -11,5 +11,7 @@ __pycache__/
 # Environment
 .env
 
-# Local file storage (uploads)
-storage/
+# Local file storage (uploads) — anchored to the backend root only, so this
+# does NOT also match backend/modules/storage/ (that bug is what deleted the
+# storage module from git history in the first place).
+/storage/
