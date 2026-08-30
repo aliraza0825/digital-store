@@ -32,12 +32,14 @@ async def admin_create_product(
     title: str = Form(...),
     description: str = Form(""),
     price: float = Form(...),
-    variantId: str = Form(...),
+    variantId: str | None = Form(None),  # optional — a product can be listed before its
+                                          # Lemon Squeezy variant exists; checkout blocks
+                                          # gracefully until this is filled in later.
     thumbnail: UploadFile = ...,
     file: UploadFile = ...,
     db: Session = Depends(get_db),
 ):
-    if not title or not price or not variantId or not thumbnail.filename or not file.filename:
+    if not title or not price or not thumbnail.filename or not file.filename:
         raise HTTPException(status_code=400, detail="Missing required fields")
 
     product_id = uuid.uuid4()

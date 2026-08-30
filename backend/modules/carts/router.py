@@ -77,6 +77,20 @@ async def checkout_cart(
     if not cart.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
+    # Lemon Squeezy's hosted checkout is created against a single variant. This
+    # endpoint was only ever billing the FIRST cart line while finalize_paid_order()
+    # grants a download token for every order item — i.e. a 2+ item cart would
+    # charge for one product and unlock all of them. There's no "Add to cart" UI
+    # wired up yet (only the admin Carts panel reads this data), so refuse the
+    # unsafe case outright rather than silently under-charging once a cart UI
+    # does get built.
+    if len(cart.items) > 1 or (cart.items and cart.items[0].quantity > 1):
+        raise HTTPException(
+            status_code=400,
+            detail="Multi-item cart checkout isn't supported yet — Lemon Squeezy checkout "
+            "only bills a single product per session. Buy one product at a time for now.",
+        )
+
     try:
         order_ref = order_service.create_pending_order_from_cart(
             db,
