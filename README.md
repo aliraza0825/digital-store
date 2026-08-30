@@ -1,86 +1,111 @@
 
 # Digital Store — setup guide
 
-A 3-screen store for selling digital downloads (Canva templates, ebooks, PDFs), built with
-Next.js + Supabase (database, file storage) + Lemon Squeezy (global card checkout, handles
-3D Secure automatically). Every download link works exactly once — a second attempt tells
-the buyer to purchase again.
+A 3-screen store for selling digital downloads (Canva templates, ebooks, PDFs).
+
+- **Frontend:** Next.js + Tailwind CSS (`frontend/`)
+- **Backend:** FastAPI monolith + PostgreSQL (`backend/`)
+- **Payments:** Lemon Squeezy (global card checkout, handles 3D Secure automatically)
+
+Every download link works exactly once — a second attempt tells the buyer to purchase again.
+
+## Project structure
+
+```
+digital-store/
+  frontend/            — Next.js app (pages, components, API proxy)
+  backend/
+    app/               — FastAPI entry + settings/config
+    database/          — PostgreSQL connection, models, schema.sql
+    modules/           — Feature modules (products, orders, checkout, admin, webhooks, download)
+    storage/           — Local file storage (thumbnails + product files)
+    .env               — Backend environment variables (local dev)
+```
 
 ## Screens
 
 1. **`/`** — product catalog (public)
 2. **`/checkout/[productId]`** — email/address, then hands off to payment
-3. **Lemon Squeezy hosted checkout** — the actual card payment page (you never touch card
-   numbers yourself, so there's no PCI compliance burden on you)
+3. **Lemon Squeezy hosted checkout** — card payment page
 4. **`/thank-you`** — confirms payment and shows the one-time download button
-5. **`/admin`** — password-gated: a plain form to add a product, and a list of products with
-   sold counts
+5. **`/admin`** — password-gated product upload + sold counts
 
-## One-time step: accounts you need to create
+## One-time setup
 
-### 1. Supabase (free tier is enough)
-1. Create a project at supabase.com.
-2. Go to the SQL Editor and run everything in `supabase/schema.sql` — this creates the
-   `products`/`orders` tables and the `thumbnails` (public) / `product-files` (private)
-   storage buckets.
-3. Go to Project Settings -> API and copy: Project URL, `anon` public key, `service_role`
-   key (keep this one secret — it goes server-side only).
+### 1. PostgreSQL (local install)
+
+Install PostgreSQL on your machine, create a database, then run the schema once:
+
+```bash
+createdb digital_store
+psql digital_store -f backend/database/schema.sql
+```
+
+Update `DATABASE_URL` in `backend/.env` if your local Postgres user/password differs.
 
 ### 2. Lemon Squeezy
+
 1. Create a store at lemonsqueezy.com and complete verification.
-2. For each digital product, create a matching **Product + Variant** in the Lemon Squeezy
-   dashboard (price, name). Copy each Variant ID — you'll paste it into the `/admin` upload
-   form when you add the same product on your site, so a sale on your site opens the right
-   Lemon Squeezy checkout.
-3. Settings -> API: create an API key.
-4. Settings -> Webhooks: add an endpoint pointing to
-   `https://yourdomain.com/api/webhooks/lemonsqueezy`, subscribed to the `order_created`
-   event. Copy the signing secret it gives you.
-5. Under payout settings, set your payout method (bank wire to your UK account, or
-   Payoneer) — see the separate payment feasibility notes for the trade-offs.
+2. For each product, create a matching **Product + Variant** in Lemon Squeezy and copy the Variant ID.
+3. Settings → API: create an API key.
+4. Settings → Webhooks: point to `https://your-backend-domain.com/api/webhooks/lemonsqueezy`
+   (event: `order_created`). Copy the signing secret into `backend/.env`.
 
 ### 3. Environment variables
-Copy `.env.example` to `.env.local` (for local testing) and fill in every value from steps
-1–2, plus:
-- `NEXT_PUBLIC_SITE_URL` — your live domain once deployed (e.g. `https://yourstore.com`)
-- `ADMIN_PASSWORD` — whatever password you'll use to log into `/admin`
-- `ADMIN_COOKIE_SECRET` — any long random string (used to sign the admin login cookie)
 
-## Deploy (Vercel)
+**Backend** — edit `backend/.env` (already created for local dev):
 
-1. Push this folder to a GitHub repo.
-2. Import it in vercel.com -> New Project.
-3. Add all the same environment variables from `.env.local` in Vercel's Project Settings ->
-   Environment Variables.
-4. Deploy. Vercel gives you a `*.vercel.app` URL immediately.
-5. Point your GoDaddy domain at it: in Vercel -> Project -> Settings -> Domains, add your
-   domain, then in GoDaddy DNS add the CNAME/A record Vercel shows you.
-6. Once the domain is live, update `NEXT_PUBLIC_SITE_URL` to the real domain and redeploy
-   (Lemon Squeezy's redirect back to `/thank-you` depends on this being correct).
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SITE_URL` | Public frontend URL (checkout redirect) |
+| `LEMONSQUEEZY_*` | Payment API keys |
+| `ADMIN_EMAIL` | Seeded admin user email (role=`admin`) |
+| `ADMIN_PASSWORD` | Seeded admin user password |
+| `ADMIN_COOKIE_SECRET` | Signs the login session cookie |
+| `CORS_ORIGINS` | Frontend origin(s), e.g. `http://localhost:3000` |
 
-## Adding your first product
+**Frontend** — copy `frontend/.env.example` to `frontend/.env.local`:
 
-1. Go to `/admin`, log in with `ADMIN_PASSWORD`.
-2. Fill in the form: title, description, price, the Lemon Squeezy Variant ID you created
-   above, a thumbnail image, and the actual file buyers will receive.
-3. It appears immediately on the homepage.
+| Variable | Purpose |
+|----------|---------|
+| `API_URL` | FastAPI backend URL (server-side + rewrites) |
+| `NEXT_PUBLIC_API_URL` | Same URL, exposed to browser for thumbnails |
+| `NEXT_PUBLIC_SITE_URL` | Public site URL |
 
-## How "pay once, download once" works
-
-- On payment, Lemon Squeezy calls your `/api/webhooks/lemonsqueezy` endpoint.
-- That handler mints a random one-time token and stores it against the order.
-- The buyer's download button points at `/api/download/[token]`.
-- The first request marks the token used and redirects to a 60-second signed link to the
-  real file in private storage.
-- Any later request with that same token is rejected with a message to purchase again.
+The frontend proxies all `/api/*` requests to FastAPI via `frontend/next.config.mjs`.
 
 ## Local development
 
 ```bash
+# Terminal 1 — Backend (FastAPI + uvicorn)
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+./run.sh
+
+# Terminal 2 — Frontend (Next.js)
+cd frontend
+cp .env.example .env.local   # if not already present
 npm install
-cp .env.example .env.local   # fill in real values
 npm run dev
 ```
 
-Note: Lemon Squeezy webhooks can't reach `localhost` directly — use a tool like `ngrok` to
-test the full payment flow locally, or just test against your deployed Vercel URL.
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- API docs: http://localhost:8000/docs
+
+Note: Lemon Squeezy webhooks can't reach `localhost` — use `ngrok` on port 8000 or test on a deployed backend.
+
+## Adding your first product
+
+1. Go to http://localhost:3000/admin and log in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `backend/.env`.
+2. Use the admin tabs to manage products, users, carts, and orders.
+3. New products appear on the homepage immediately.
+
+## How "pay once, download once" works
+
+- Lemon Squeezy calls `/api/webhooks/lemonsqueezy` after payment.
+- The handler mints a one-time download token on the order.
+- The buyer's button points at `/api/download/[token]`.
+- First request serves the file and burns the token; any retry is rejected.
